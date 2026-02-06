@@ -215,10 +215,10 @@ class PlaywrightWorker(QThread):
 
                     if task == "fetch":
                         url = payload.get("url", "")
-                        if not url:
-                            self.error.emit("URL is empty.")
-                            continue
                         try:
+                            if not url and self._page is None:
+                                self.error.emit("No active page to refresh. Please open URL first.")
+                                continue
                             self._ensure_page(url)
                             fields = self._extract_fields()
                             self.log.emit(f"Detected fields: {len(fields)}")
@@ -257,15 +257,18 @@ class App(QWidget):
         self.url_edit.setPlaceholderText("Enter URL (e.g., https://example.com/form)")
 
         self.btn_fetch = QPushButton("Fetch Fields")
+        self.btn_refresh = QPushButton("Refresh Fields")
         self.btn_import = QPushButton("Import TXT")
         self.btn_fill = QPushButton("Fill Current Page")
         self.btn_import.setEnabled(False)
         self.btn_fill.setEnabled(False)
+        self.btn_refresh.setEnabled(False)
 
         top = QHBoxLayout()
         top.addWidget(QLabel("URL:"))
         top.addWidget(self.url_edit, 1)
         top.addWidget(self.btn_fetch)
+        top.addWidget(self.btn_refresh)
         top.addWidget(self.btn_import)
         top.addWidget(self.btn_fill)
 
@@ -291,6 +294,7 @@ class App(QWidget):
         layout.addWidget(self.log_view, 0)
 
         self.btn_fetch.clicked.connect(self.fetch_fields)
+        self.btn_refresh.clicked.connect(self.refresh_fields)
         self.btn_import.clicked.connect(self.import_txt)
         self.btn_fill.clicked.connect(self.fill_current_page)
 
@@ -303,6 +307,7 @@ class App(QWidget):
         self._worker.fields_ready.connect(self._on_fields_ready)
         self._worker.done.connect(self._on_fill_done)
         self._worker.start()
+        self._has_page = False
 
     def append_log(self, msg: str):
         self.log_view.append(msg)
@@ -323,6 +328,8 @@ class App(QWidget):
 
         self._worker.request_fetch(url)
         self.btn_fetch.setEnabled(True)
+        self.btn_refresh.setEnabled(True)
+        self._has_page = True
 
     def _on_worker_error(self, msg: str):
         self.append_log(f"[ERROR] {msg}")
@@ -363,6 +370,15 @@ class App(QWidget):
         self.append_log("---- Fetch done ----")
         self.btn_import.setEnabled(self.table.rowCount() > 0)
         self.btn_fill.setEnabled(self.table.rowCount() > 0)
+
+    def refresh_fields(self):
+        # Re-scan current page (after login / navigation)
+        if not self._worker:
+            self.show_error("Browser is not ready.")
+            return
+        self.append_log("---- Refresh start ----")
+        self._worker.request_fetch("")
+        self._has_page = True
 
     def import_txt(self):
         if self.table.rowCount() == 0:
@@ -561,7 +577,8 @@ class App(QWidget):
         self.append_log("---- Fill start ----")
         self.btn_fill.setEnabled(False)
 
-        self._worker.request_fill(fills, url=url)
+        # If we already have an open page, do not navigate again
+        self._worker.request_fill(fills, url="" if self._has_page else url)
 
     def _on_fill_done(self):
         self.append_log("---- Fill done ----")
