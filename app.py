@@ -161,10 +161,21 @@ class PlaywrightWorker(QThread):
               options = Array.from(el.options || []).map(o => (o.textContent || '').trim()).filter(Boolean);
             }
 
-            fields.push({ selector, label, tag, input_type: inputType, required, options });
-          }
-          return fields;
-        }
+                    fields.push({
+                      selector,
+                      label,
+                      tag,
+                      input_type: inputType,
+                      required,
+                      options,
+                      name: el.getAttribute('name') || '',
+                      id: el.id || '',
+                      aria: el.getAttribute('aria-label') || '',
+                      placeholder: el.getAttribute('placeholder') || ''
+                    });
+                  }
+                  return fields;
+                }
         """
         return self._page.evaluate(js)
 
@@ -350,7 +361,16 @@ class App(QWidget):
             selector = f.get("selector", "")
             options = f.get("options", None)
 
-            self.table.setItem(row, 0, QTableWidgetItem(label))
+            label_item = QTableWidgetItem(label)
+            meta = {
+                "label": label,
+                "name": f.get("name", ""),
+                "id": f.get("id", ""),
+                "aria": f.get("aria", ""),
+                "placeholder": f.get("placeholder", "")
+            }
+            label_item.setData(Qt.ItemDataRole.UserRole, meta)
+            self.table.setItem(row, 0, label_item)
             self.table.setItem(row, 1, QTableWidgetItem(f"{tag}/{itype}"))
             self.table.setItem(row, 2, QTableWidgetItem("Yes" if required else "No"))
 
@@ -422,9 +442,15 @@ class App(QWidget):
             if k and v:
                 kv[k] = v
 
+        # If the content is a single pipe-separated line, treat as values list
+        pipe_values = []
+        if len(lines) == 1 and "|" in lines[0]:
+            pipe_values = [v.strip() for v in lines[0].split("|") if v.strip()]
+
         return {
             "lines": lines,
-            "kv": kv
+            "kv": kv,
+            "pipe_values": pipe_values
         }
 
     def _normalize(self, s: str) -> str:
@@ -434,6 +460,7 @@ class App(QWidget):
         # Best-effort mapping by label keywords + value patterns
         lines = self._txt_data.get("lines", [])
         kv = self._txt_data.get("kv", {})
+        pipe_values = self._txt_data.get("pipe_values", [])
 
         # Build candidate values by pattern
         def is_email(v): return "@" in v and "." in v
@@ -451,8 +478,16 @@ class App(QWidget):
         def is_expiry(v):
             # accept MM/YY, MM/YYYY, YYYY-MM
             return any(x in v for x in ("/", "-")) and any(ch.isdigit() for ch in v)
+        def is_country_code(v):
+            return len(v) == 2 and v.isalpha()
+        def is_postal(v):
+            digits = "".join(ch for ch in v if ch.isdigit())
+            return len(digits) >= 4
 
-        values = list(kv.values()) if kv else lines
+        if pipe_values:
+            values = pipe_values
+        else:
+            values = list(kv.values()) if kv else lines
 
         # keywords map (zh + en)
         kw_map = {
@@ -469,15 +504,48 @@ class App(QWidget):
             "card_holder": ["持卡人", "cardholder", "name on card"],
             "bank": ["發卡銀行", "銀行", "issuer", "bank"],
             "billing_address": ["帳單地址", "billing address", "billing"],
+            "city": ["城市", "city", "town"],
+            "state": ["州", "省", "state", "province", "region"],
+            "postal": ["郵遞區號", "zip", "postal", "postcode"],
+            "country": ["國家", "國別", "country", "nation"]
         }
 
         used = set()
         mapped = 0
 
+        # Special handling for pipe format: assume common order if not enough labels
+        pipe_hint = {}
+        if pipe_values and len(pipe_values) >= 8:
+            # common order: card | mm | yy | cvv | name | addr1 | city | state | postal | country | phone | email
+            p = pipe_values
+            pipe_hint = {
+                "card_number": p[0] if len(p) > 0 else "",
+                "exp_month": p[1] if len(p) > 1 else "",
+                "exp_year": p[2] if len(p) > 2 else "",
+                "card_cvv": p[3] if len(p) > 3 else "",
+                "card_holder": p[4] if len(p) > 4 else "",
+                "address": p[5] if len(p) > 5 else "",
+                "city": p[6] if len(p) > 6 else "",
+                "state": p[7] if len(p) > 7 else "",
+                "postal": p[8] if len(p) > 8 else "",
+                "country": p[9] if len(p) > 9 else "",
+                "phone": p[10] if len(p) > 10 else "",
+                "email": p[11] if len(p) > 11 else ""
+            }
+
         for r in range(self.table.rowCount()):
-            label = self.table.item(r, 0).text()
+            label_item = self.table.item(r, 0)
+            label = label_item.text()
             tag_type = self.table.item(r, 1).text()
-            label_norm = self._normalize(label)
+            meta = label_item.data(Qt.ItemDataRole.UserRole) or {}
+            combined = " ".join([
+                label,
+                meta.get("name", ""),
+                meta.get("id", ""),
+                meta.get("aria", ""),
+                meta.get("placeholder", "")
+            ])
+            label_norm = self._normalize(combined)
 
             best_value = ""
 
@@ -487,6 +555,34 @@ class App(QWidget):
                     if self._normalize(k) in label_norm or label_norm in self._normalize(k):
                         best_value = v
                         break
+
+            # Pipe hints by field name patterns
+            if not best_value and pipe_hint:
+                if any(x in label_norm for x in ["cardnumber", "cardnumber", "ccnumber", "cardnumber", "pan"]):
+                    best_value = pipe_hint.get("card_number", "")
+                elif any(x in label_norm for x in ["cardexpiry", "expiry", "exp", "expiration"]):
+                    m = pipe_hint.get("exp_month", "")
+                    y = pipe_hint.get("exp_year", "")
+                    if m and y:
+                        best_value = f"{m}/{y}"
+                elif any(x in label_norm for x in ["cardcvc", "cardcvv", "cvc", "cvv", "securitycode"]):
+                    best_value = pipe_hint.get("card_cvv", "")
+                elif any(x in label_norm for x in ["billingname", "cardholder", "nameoncard"]):
+                    best_value = pipe_hint.get("card_holder", "")
+                elif "billingaddressline1" in label_norm or "addressline1" in label_norm:
+                    best_value = pipe_hint.get("address", "")
+                elif "billinglocality" in label_norm or "city" in label_norm:
+                    best_value = pipe_hint.get("city", "")
+                elif "billingdependentlocality" in label_norm or "state" in label_norm or "province" in label_norm:
+                    best_value = pipe_hint.get("state", "")
+                elif "billingpostalcode" in label_norm or "postal" in label_norm or "zip" in label_norm:
+                    best_value = pipe_hint.get("postal", "")
+                elif "billingcountry" in label_norm or "country" in label_norm:
+                    best_value = pipe_hint.get("country", "")
+                elif "phone" in label_norm or "mobile" in label_norm:
+                    best_value = pipe_hint.get("phone", "")
+                elif "email" in label_norm:
+                    best_value = pipe_hint.get("email", "")
 
             # If no kv match, heuristic by keywords + value pattern
             if not best_value:
@@ -514,10 +610,19 @@ class App(QWidget):
                             if key == "card_cvv" and is_cvv(v):
                                 best_value = v
                                 break
+                            if key == "country" and is_country_code(v):
+                                best_value = v
+                                break
+                            if key == "postal" and is_postal(v):
+                                best_value = v
+                                break
                             if key in ("name", "company", "address", "id"):
                                 best_value = v
                                 break
                             if key in ("card_holder", "bank", "billing_address"):
+                                best_value = v
+                                break
+                            if key in ("city", "state"):
                                 best_value = v
                                 break
                     if best_value:
