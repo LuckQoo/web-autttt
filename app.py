@@ -261,16 +261,16 @@ class PlaywrightWorker(QThread):
 class App(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Auto Form Fetch & Fill (MVP)")
+        self.setWindowTitle(" 小天才 (Yu製作盜用必究) ")
         self.resize(1000, 650)
 
         self.url_edit = QLineEdit()
         self.url_edit.setPlaceholderText("Enter URL (e.g., https://example.com/form)")
 
-        self.btn_fetch = QPushButton("Fetch Fields")
-        self.btn_refresh = QPushButton("Refresh Fields")
-        self.btn_import = QPushButton("Import TXT")
-        self.btn_fill = QPushButton("Fill Current Page")
+        self.btn_fetch = QPushButton("搜尋網頁")
+        self.btn_refresh = QPushButton("重整/換新料")
+        self.btn_import = QPushButton("導入資料(要複製一份資料)")
+        self.btn_fill = QPushButton("導出資料")
         self.btn_import.setEnabled(False)
         self.btn_fill.setEnabled(False)
         self.btn_refresh.setEnabled(False)
