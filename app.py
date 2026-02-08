@@ -379,16 +379,19 @@ class App(QWidget):
         self.url_edit.setPlaceholderText("網址貼在這邊然後點旁邊的搜尋網頁刷新網頁也在這")
 
         self.btn_fetch = QPushButton("搜尋網頁")
-        self.btn_refresh = QPushButton("重整/換新料")
-        self.btn_clear = QPushButton("清除值")
+        self.btn_refresh = QPushButton("表格需要重讀在按")
+        self.btn_clear = QPushButton("清除數值")
         self.btn_import = QPushButton("導入資料(要複製一份資料)")
-        self.btn_fill = QPushButton("導出資料")
-        self.chk_submit = QCheckBox("Auto submit after fill")
+        self.btn_fill = QPushButton("傳輸")
+        self.chk_submit = QCheckBox("連按支付都懶的時候用")
         self.chk_submit.setChecked(True)
         self.btn_import.setEnabled(False)
         self.btn_fill.setEnabled(False)
         self.btn_refresh.setEnabled(False)
         self.btn_clear.setEnabled(False)
+        for b in (self.btn_fetch, self.btn_refresh, self.btn_clear, self.btn_import, self.btn_fill):
+            b.setMinimumHeight(36)
+            b.setMinimumWidth(110)
 
         top = QHBoxLayout()
         top.addWidget(QLabel("URL:"))
@@ -888,6 +891,58 @@ class App(QWidget):
 
 def main():
     app = QApplication(sys.argv)
+    app.setStyleSheet("""
+        QWidget {
+            background-color: #121417;
+            color: #EAEFF2;
+            font-size: 13px;
+        }
+        QLineEdit, QTextEdit, QPlainTextEdit, QTableWidget {
+            background-color: #1A1F24;
+            color: #F4F7FA;
+            border: 1px solid #2A3138;
+            selection-background-color: #2D7EF7;
+            selection-color: #FFFFFF;
+        }
+        QTableWidget::item {
+            background-color: #1A1F24;
+        }
+        QHeaderView::section {
+            background-color: #171B20;
+            color: #EAEFF2;
+            border: 1px solid #2A3138;
+            padding: 4px 6px;
+        }
+        QPushButton {
+            background-color: #222A33;
+            color: #F5F8FA;
+            border: 1px solid #2F3740;
+            padding: 6px 10px;
+            border-radius: 4px;
+        }
+        QPushButton:hover {
+            background-color: #2A3440;
+        }
+        QPushButton:pressed {
+            background-color: #1E252D;
+        }
+        QPushButton:disabled {
+            background-color: #1A1F24;
+            color: #6D7A86;
+            border: 1px solid #232A31;
+        }
+        QCheckBox {
+            spacing: 6px;
+        }
+        QCheckBox::indicator {
+            width: 16px;
+            height: 16px;
+        }
+        QMessageBox {
+            background-color: #121417;
+            color: #EAEFF2;
+        }
+    """)
     w = App()
     w.show()
     sys.exit(app.exec())
