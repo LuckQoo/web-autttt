@@ -261,7 +261,7 @@ class PlaywrightWorker(QThread):
 class App(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(" 小天才 (Yu製作盜用必究) ")
+        self.setWindowTitle(" 爬床貨 (Yu製作盜用必究) ")
         self.resize(1000, 650)
 
         self.url_edit = QLineEdit()
@@ -755,3 +755,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
