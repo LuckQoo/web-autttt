@@ -1,5 +1,6 @@
 import sys
 import json
+import re
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional
 
@@ -7,7 +8,7 @@ from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton,
     QTableWidget, QTableWidgetItem, QMessageBox, QLabel, QHeaderView, QTextEdit,
-    QFileDialog
+    QFileDialog, QCheckBox
 )
 
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeoutError
@@ -48,8 +49,8 @@ class PlaywrightWorker(QThread):
     def request_fetch(self, url: str):
         self._tasks.put(("fetch", {"url": url.strip()}))
 
-    def request_fill(self, fills: List[Dict[str, Any]], url: str = ""):
-        self._tasks.put(("fill", {"fills": fills, "url": url.strip()}))
+    def request_fill(self, fills: List[Dict[str, Any]], url: str = "", auto_submit: bool = False):
+        self._tasks.put(("fill", {"fills": fills, "url": url.strip(), "auto_submit": auto_submit}))
 
     def _ensure_page(self, url: str):
         if self._page is None:
@@ -211,6 +212,75 @@ class PlaywrightWorker(QThread):
             else:
                 self._page.fill(selector, str(value))
 
+    def _try_submit(self) -> bool:
+        # Click only payment/checkout related buttons, prefer the last one in the form/page.
+        keywords = [
+            "pay", "payment",
+            "支付", "付款", "立即支付"
+        ]
+
+        # Find the last visible matching button and click it once.
+        js = r"""
+        (keywords) => {
+          const kw = keywords.map(k => k.toLowerCase());
+          const isVisible = (el) => {
+            const st = window.getComputedStyle(el);
+            if (!st) return false;
+            if (st.visibility === 'hidden' || st.display === 'none') return false;
+            const r = el.getBoundingClientRect();
+            return (r.width > 0 && r.height > 0);
+          };
+          const match = (text) => {
+            if (!text) return false;
+            const t = text.toLowerCase();
+            return kw.some(k => t.includes(k));
+          };
+          const all = Array.from(document.querySelectorAll(
+            'button, input[type="submit"], input[type="button"], input[type="image"], [role="button"]'
+          ));
+          const form = document.activeElement ? document.activeElement.closest('form') : document.querySelector('form');
+          const scope = form ? Array.from(form.querySelectorAll('button, input[type="submit"], input[type="button"], input[type="image"], [role="button"]')) : all;
+
+          const candidates = scope.filter(el => {
+            if (!isVisible(el) || el.disabled) return false;
+            const text = (el.innerText || el.value || el.getAttribute('aria-label') || '').trim();
+            return match(text);
+          });
+
+          if (!candidates.length) return false;
+          const el = candidates[candidates.length - 1]; // prefer last (usually at form end)
+          el.click();
+          return true;
+          return false;
+        }
+        """
+        try:
+            if self._page.evaluate(js, keywords):
+                return True
+        except Exception:
+            pass
+
+        # 3) Fallback: submit the closest form if possible
+        js_form = r"""
+        () => {
+          const active = document.activeElement;
+          const form = active ? active.closest('form') : document.querySelector('form');
+          if (form) {
+            if (form.requestSubmit) {
+              form.requestSubmit();
+            } else {
+              form.submit();
+            }
+            return true;
+          }
+          return false;
+        }
+        """
+        try:
+            return bool(self._page.evaluate(js_form))
+        except Exception:
+            return False
+
     def run(self):
         try:
             with sync_playwright() as p:
@@ -240,10 +310,16 @@ class PlaywrightWorker(QThread):
                     if task == "fill":
                         fills = payload.get("fills", [])
                         url = payload.get("url", "")
+                        auto_submit = payload.get("auto_submit", False)
                         try:
                             self._ensure_page(url)
                             self._fill_fields(fills)
-                            self.log.emit("Fill completed. (Not submitting)")
+                            if auto_submit:
+                                self.log.emit("Fill completed. Trying to submit...")
+                                submitted = self._try_submit()
+                                self.log.emit("Auto submit done." if submitted else "Auto submit not found.")
+                            else:
+                                self.log.emit("Fill completed. (Not submitting)")
                             self.done.emit()
                         except Exception as e:
                             self.error.emit(str(e))
@@ -261,7 +337,7 @@ class PlaywrightWorker(QThread):
 class App(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(" 爬床貨 (Yu製作盜用必究) ")
+        self.setWindowTitle(" 小天才 (Yu製作盜用必究) ")
         self.resize(1000, 650)
 
         self.url_edit = QLineEdit()
@@ -271,6 +347,8 @@ class App(QWidget):
         self.btn_refresh = QPushButton("重整/換新料")
         self.btn_import = QPushButton("導入資料(要複製一份資料)")
         self.btn_fill = QPushButton("導出資料")
+        self.chk_submit = QCheckBox("Auto submit after fill")
+        self.chk_submit.setChecked(True)
         self.btn_import.setEnabled(False)
         self.btn_fill.setEnabled(False)
         self.btn_refresh.setEnabled(False)
@@ -282,6 +360,7 @@ class App(QWidget):
         top.addWidget(self.btn_refresh)
         top.addWidget(self.btn_import)
         top.addWidget(self.btn_fill)
+        top.addWidget(self.chk_submit)
 
         self.table = QTableWidget(0, 6)
         self.table.setHorizontalHeaderLabels(["Label", "Tag/Type", "Required", "Selector", "Options", "Value to Fill"])
@@ -712,7 +791,11 @@ class App(QWidget):
         self.btn_fill.setEnabled(False)
 
         # If we already have an open page, do not navigate again
-        self._worker.request_fill(fills, url="" if self._has_page else url)
+        self._worker.request_fill(
+            fills,
+            url="" if self._has_page else url,
+            auto_submit=self.chk_submit.isChecked()
+        )
 
     def _on_fill_done(self):
         self.append_log("---- Fill done ----")
@@ -755,4 +838,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
