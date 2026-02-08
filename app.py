@@ -376,13 +376,13 @@ class App(QWidget):
         self.resize(1000, 650)
 
         self.url_edit = QLineEdit()
-        self.url_edit.setPlaceholderText("網址貼在這邊然後點旁邊的搜尋網頁刷新網頁也在這")
+        self.url_edit.setPlaceholderText(" 網 址 貼 在 這 邊")
 
         self.btn_fetch = QPushButton("搜尋網頁")
-        self.btn_refresh = QPushButton("表格需要重讀在按")
-        self.btn_clear = QPushButton("清除數值")
+        self.btn_refresh = QPushButton("表格需要重讀在點")
+        self.btn_clear = QPushButton("清除數據")
         self.btn_import = QPushButton("導入資料(要複製一份資料)")
-        self.btn_fill = QPushButton("傳輸")
+        self.btn_fill = QPushButton(" 傳 輸 😎")
         self.chk_submit = QCheckBox("連按支付都懶的時候用")
         self.chk_submit.setChecked(True)
         self.btn_import.setEnabled(False)
@@ -419,7 +419,7 @@ class App(QWidget):
 
         layout = QVBoxLayout(self)
         layout.addLayout(top)
-        layout.addWidget(QLabel("Detected Fields"))
+        layout.addWidget(QLabel("Yu的爬蟲貨:僅供教學😊違法純屬個人行為😊快速好用😊腳本製作😊代碼編譯😊伺服器出租"))
         layout.addWidget(self.table, 1)
         layout.addWidget(QLabel("Log"))
         layout.addWidget(self.log_view, 0)
