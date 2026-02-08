@@ -194,6 +194,37 @@ class PlaywrightWorker(QThread):
             self._page.wait_for_selector(selector, state="visible", timeout=15000)
 
             if tag == "select":
+                # Prefer in-page JS selection to avoid slow Playwright option scanning on huge selects.
+                js = r"""
+                ({selector, value}) => {
+                  const sel = document.querySelector(selector);
+                  if (!sel || sel.tagName.toLowerCase() !== 'select') return false;
+                  const target = String(value).trim();
+                  if (!target) return false;
+
+                  let foundValue = "";
+                  const lower = target.toLowerCase();
+                  for (const opt of sel.options) {
+                    const text = (opt.textContent || "").trim().toLowerCase();
+                    const val = (opt.value || "").trim().toLowerCase();
+                    if (text === lower || val === lower) {
+                      foundValue = opt.value;
+                      break;
+                    }
+                  }
+                  if (!foundValue) return false;
+                  sel.value = foundValue;
+                  sel.dispatchEvent(new Event('input', { bubbles: true }));
+                  sel.dispatchEvent(new Event('change', { bubbles: true }));
+                  return true;
+                }
+                """
+                try:
+                    ok = self._page.evaluate(js, {"selector": selector, "value": value})
+                    if ok:
+                        continue
+                except Exception:
+                    pass
                 try:
                     self._page.select_option(selector, label=value)
                 except Exception:
@@ -215,8 +246,12 @@ class PlaywrightWorker(QThread):
     def _try_submit(self) -> bool:
         # Click only payment/checkout related buttons, prefer the last one in the form/page.
         keywords = [
-            "pay", "payment",
-            "支付", "付款", "立即支付"
+            # English
+            "pay", "payment", "checkout", "place order", "confirm", "submit", "purchase", "complete",
+            # Traditional Chinese
+            "支付", "付款", "結帳", "結算", "下單", "確認", "送出", "確定", "提交", "購買", "完成", "立即支付",
+            # Simplified Chinese
+            "支付", "付款", "结账", "结算", "下单", "确认", "提交", "购买", "完成"
         ]
 
         # Find the last visible matching button and click it once.
@@ -341,10 +376,11 @@ class App(QWidget):
         self.resize(1000, 650)
 
         self.url_edit = QLineEdit()
-        self.url_edit.setPlaceholderText("Enter URL (e.g., https://example.com/form)")
+        self.url_edit.setPlaceholderText("網址貼在這邊然後點旁邊的搜尋網頁刷新網頁也在這")
 
         self.btn_fetch = QPushButton("搜尋網頁")
         self.btn_refresh = QPushButton("重整/換新料")
+        self.btn_clear = QPushButton("清除值")
         self.btn_import = QPushButton("導入資料(要複製一份資料)")
         self.btn_fill = QPushButton("導出資料")
         self.chk_submit = QCheckBox("Auto submit after fill")
@@ -352,12 +388,14 @@ class App(QWidget):
         self.btn_import.setEnabled(False)
         self.btn_fill.setEnabled(False)
         self.btn_refresh.setEnabled(False)
+        self.btn_clear.setEnabled(False)
 
         top = QHBoxLayout()
         top.addWidget(QLabel("URL:"))
         top.addWidget(self.url_edit, 1)
         top.addWidget(self.btn_fetch)
         top.addWidget(self.btn_refresh)
+        top.addWidget(self.btn_clear)
         top.addWidget(self.btn_import)
         top.addWidget(self.btn_fill)
         top.addWidget(self.chk_submit)
@@ -385,6 +423,7 @@ class App(QWidget):
 
         self.btn_fetch.clicked.connect(self.fetch_fields)
         self.btn_refresh.clicked.connect(self.refresh_fields)
+        self.btn_clear.clicked.connect(self.clear_values)
         self.btn_import.clicked.connect(self.import_txt)
         self.btn_fill.clicked.connect(self.fill_current_page)
 
@@ -422,6 +461,7 @@ class App(QWidget):
         self._worker.request_fetch(url)
         self.btn_fetch.setEnabled(True)
         self.btn_refresh.setEnabled(True)
+        self.btn_clear.setEnabled(True)
         self._has_page = True
 
     def _on_worker_error(self, msg: str):
@@ -430,6 +470,8 @@ class App(QWidget):
         self.btn_fetch.setEnabled(True)
 
     def _on_fields_ready(self, fields: List[Dict[str, Any]]):
+        self.table.blockSignals(True)
+        self.table.setUpdatesEnabled(False)
         self.table.setRowCount(0)
 
         for f in fields:
@@ -469,9 +511,13 @@ class App(QWidget):
 
             self.table.setItem(row, 5, QTableWidgetItem(""))
 
+        self.table.setUpdatesEnabled(True)
+        self.table.blockSignals(False)
+
         self.append_log("---- Fetch done ----")
         self.btn_import.setEnabled(self.table.rowCount() > 0)
         self.btn_fill.setEnabled(self.table.rowCount() > 0)
+        self.btn_clear.setEnabled(self.table.rowCount() > 0)
 
     def refresh_fields(self):
         # Re-scan current page (after login / navigation)
@@ -481,6 +527,17 @@ class App(QWidget):
         self.append_log("---- Refresh start ----")
         self._worker.request_fetch("")
         self._has_page = True
+
+    def clear_values(self):
+        if self.table.rowCount() == 0:
+            return
+        self.table.blockSignals(True)
+        self.table.setUpdatesEnabled(False)
+        for r in range(self.table.rowCount()):
+            self.table.setItem(r, 5, QTableWidgetItem(""))
+        self.table.setUpdatesEnabled(True)
+        self.table.blockSignals(False)
+        self.btn_fill.setEnabled(False)
 
     def import_txt(self):
         if self.table.rowCount() == 0:
