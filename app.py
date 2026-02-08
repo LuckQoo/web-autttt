@@ -337,7 +337,7 @@ class PlaywrightWorker(QThread):
                                 continue
                             self._ensure_page(url)
                             fields = self._extract_fields()
-                            self.log.emit(f"Detected fields: {len(fields)}")
+                            self.log.emit(f"Yu的爬蟲貨:僅供教學😊快速好用😊腳本製作😊代碼編譯😊伺服器出租   {len(fields)}")
                             self.fields_ready.emit(fields)
                         except Exception as e:
                             self.error.emit(str(e))
@@ -894,12 +894,12 @@ def main():
     app.setStyleSheet("""
         QWidget {
             background-color: #121417;
-            color: #EAEFF2;
+            color: #7CFF7A;
             font-size: 13px;
         }
         QLineEdit, QTextEdit, QPlainTextEdit, QTableWidget {
             background-color: #1A1F24;
-            color: #F4F7FA;
+            color: #7CFF7A;
             border: 1px solid #2A3138;
             selection-background-color: #2D7EF7;
             selection-color: #FFFFFF;
@@ -909,13 +909,13 @@ def main():
         }
         QHeaderView::section {
             background-color: #171B20;
-            color: #EAEFF2;
+            color: #7CFF7A;
             border: 1px solid #2A3138;
             padding: 4px 6px;
         }
         QPushButton {
             background-color: #222A33;
-            color: #F5F8FA;
+            color: #7CFF7A;
             border: 1px solid #2F3740;
             padding: 6px 10px;
             border-radius: 4px;
@@ -928,7 +928,7 @@ def main():
         }
         QPushButton:disabled {
             background-color: #1A1F24;
-            color: #6D7A86;
+            color: #4E6A4E;
             border: 1px solid #232A31;
         }
         QCheckBox {
@@ -940,7 +940,7 @@ def main():
         }
         QMessageBox {
             background-color: #121417;
-            color: #EAEFF2;
+            color: #7CFF7A;
         }
     """)
     w = App()
