@@ -319,6 +319,9 @@ class App(QWidget):
         self._worker.done.connect(self._on_fill_done)
         self._worker.start()
         self._has_page = False
+        self._txt_source_path = ""
+        self._txt_queue: List[str] = []
+        self._txt_mode = "single"
 
     def append_log(self, msg: str):
         self.log_view.append(msg)
@@ -418,13 +421,37 @@ class App(QWidget):
             self.show_error(f"Failed to read TXT: {e}")
             return
 
-        self._txt_data = self._parse_txt(raw)
-        self.append_log(f"Imported TXT lines: {len(self._txt_data.get('lines', []))}")
+        self._init_txt_queue(raw, file_path)
+        total_lines = len(self._txt_queue) if self._txt_mode == "queue" else len(self._txt_data.get("lines", []))
+        self.append_log(f"Imported TXT lines: {total_lines}")
 
         # Auto map and fill values in table
-        mapped = self._auto_map_to_fields()
+        mapped = self._auto_map_to_fields(clear_values=True)
         self.append_log(f"Auto-mapped fields: {mapped}")
         self.btn_fill.setEnabled(self.table.rowCount() > 0)
+
+    def _init_txt_queue(self, raw: str, file_path: str):
+        # Decide whether to treat TXT as a queue of single-line records
+        lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+        self._txt_source_path = file_path
+
+        has_pipe = any("|" in ln for ln in lines)
+        has_kv = all(("=" in ln) or (":" in ln) for ln in lines) if lines else False
+
+        if len(lines) > 1 and (has_pipe or not has_kv):
+            # Record-per-line queue mode
+            self._txt_mode = "queue"
+            self._txt_queue = lines
+            self._set_current_txt_line(lines[0])
+        else:
+            # Single record (supports multi-line key/value)
+            self._txt_mode = "single"
+            self._txt_queue = []
+            self._txt_data = self._parse_txt(raw)
+
+    def _set_current_txt_line(self, line: str):
+        # Parse a single line as the current record
+        self._txt_data = self._parse_txt(line)
 
     def _parse_txt(self, raw: str) -> Dict[str, Any]:
         # Parse lines, keep key-value pairs if present, else keep as free lines
@@ -456,7 +483,7 @@ class App(QWidget):
     def _normalize(self, s: str) -> str:
         return "".join(ch.lower() for ch in s if ch.isalnum())
 
-    def _auto_map_to_fields(self) -> int:
+    def _auto_map_to_fields(self, clear_values: bool = False) -> int:
         # Best-effort mapping by label keywords + value patterns
         lines = self._txt_data.get("lines", [])
         kv = self._txt_data.get("kv", {})
@@ -534,6 +561,8 @@ class App(QWidget):
             }
 
         for r in range(self.table.rowCount()):
+            if clear_values:
+                self.table.setItem(r, 5, QTableWidgetItem(""))
             label_item = self.table.item(r, 0)
             label = label_item.text()
             tag_type = self.table.item(r, 1).text()
@@ -688,6 +717,27 @@ class App(QWidget):
     def _on_fill_done(self):
         self.append_log("---- Fill done ----")
         self.btn_fill.setEnabled(True)
+        if self._txt_mode == "queue" and self._txt_queue:
+            # Consume first line and advance to next
+            self._txt_queue.pop(0)
+            if self._txt_queue:
+                self._set_current_txt_line(self._txt_queue[0])
+                mapped = self._auto_map_to_fields(clear_values=True)
+                self.append_log(f"Advanced to next TXT line. Auto-mapped fields: {mapped}")
+            else:
+                self.append_log("TXT queue empty.")
+                self._txt_data = {"lines": [], "kv": {}, "pipe_values": []}
+
+            # Persist remaining lines back to the TXT file
+            if self._txt_source_path:
+                try:
+                    with open(self._txt_source_path, "w", encoding="utf-8") as f:
+                        if self._txt_queue:
+                            f.write("\n".join(self._txt_queue) + "\n")
+                        else:
+                            f.write("")
+                except Exception as e:
+                    self.append_log(f"[ERROR] Failed to update TXT: {e}")
 
     def closeEvent(self, event):
         if self._worker:
